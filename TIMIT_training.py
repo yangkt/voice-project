@@ -1,7 +1,10 @@
+<<<<<<< HEAD
+=======
 import pycuda.driver as cuda
 
 import numpy as np
 import pandas as pd
+>>>>>>> 450ae4dbb9909140fa04aeebd7b2b68d0591a297
 
 import torch
 import torch.nn as nn
@@ -10,6 +13,26 @@ import torch.nn.functional as F
 from torch.utils.data import Dataset, DataLoader
 
 from TIMIT import FeatureExtraction, Classifier
+<<<<<<< HEAD
+from TIMIT import TIMITDataSet
+from TIMIT import phonedict
+
+from FT_Transpose import AudioGenerator
+from TIMIT_Dataset import TIMITNoisyDataSet
+
+def weights_init(m):
+    classname = m.__class__.__name__
+    print("module: ", classname)
+    #
+    if classname.find('Conv') != -1:
+        (row, col) = m.kernel_size
+        inC = m.in_channels
+        stdev = math.sqrt(1/(inC*row*col))*0.9
+        m.weight.data.normal_(0.0, stdev)
+        print("for Conv modules, use customized initial weights, normal distribution: (0.0, ", stdev, ")")
+    elif classname.find('Linear') != -1:
+        print("for Linear modules, use the default initialization values")
+=======
 
 from TIMIT import TIMITDataSet
 
@@ -20,6 +43,7 @@ torch.cuda.memory_allocated()  # the amount of GPU memory allocated
 torch.cuda.memory_cached()     # the amount of GPU memory cached   
 
 torch.cuda.empty_cache()  #release all the GPU memory cache that can be freed.
+>>>>>>> 450ae4dbb9909140fa04aeebd7b2b68d0591a297
 
 
 #----------------------------------------------------------------------------------
