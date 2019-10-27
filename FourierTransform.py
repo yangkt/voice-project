@@ -75,7 +75,8 @@ class FourierTransform(object):
         #TEST GRAPH:   Plot each individual frame on the same graph
         (_, frqBndCnt, frameCnt) = np.shape(spectrogram)
         x = frqcyBnd[0] 
-        #x = np.linspace(1, frqcyBnd[0][frqBndCnt-1], frqBndCnt)    
+        #x = np.linspace(1, frqcyBnd[0][frqBndCnt-1], frqBndCnt)  
+        '''
         for c in range(0, channel):
             for f in range(0, 100):
                 # randomly select 100 frames to show in a plot
@@ -85,6 +86,7 @@ class FourierTransform(object):
             plt.show()
             print()
         #
+        '''
         return channel, spectrogram, phasegram, frqcyBnd, sample_rate, sample_cnt, fft
 
 
@@ -270,7 +272,6 @@ class FourierTransform(object):
                 amp = spectrogram[channel, hIdx, fIdx]   # the amplitute for a frequency
                 hz = frqcy[channel][hIdx]             # the frequency in Hertz
                 #
-                # generate the sound bits within a frame by applying the amplitute for a frequency but ignore its phase.
                 for sIdx in range(s, s+soundBitPerFrame):                    
                     #
                     if phasegram is None:
@@ -279,9 +280,9 @@ class FourierTransform(object):
                         frqWave = amp * math.sin(2*PI*time*hz)  
                     else:
                         # Generate sound waves at the given time point and incorporating phase info
-                        time = (sIdx-s)*(1/sample_rate)  # the time point relative to the frame (ie time=0 at the beginning of a frame)
+                        time = float(sIdx-s) / float(sample_rate)  # the time point relative to the frame (ie time=0 at the beginning of a frame)
                         angle = phasegram[  channel, hIdx, fIdx]
-                        frqWave = amp * math.sin((2*PI*time+angle)*hz)  
+                        frqWave = amp * math.sin(2*PI*time*hz+angle)  
                     #
                     buffer[sIdx] += frqWave     # accumulate all sound wave the the given time point
                 #
@@ -526,15 +527,44 @@ for c in range(0, len(fileNames)):
     wavFilePathName = filePath + fileNames[c]
     channel, spectrogram, phasegram, frqcy, sample_rate = FourierTransform.FFT(wavFilePathName, melFreqBandCnt, frame_size, frame_stride, duration=0, emphasize=False)
 
-channel, spectrogram, phasegram, frqcy, sample_rate = FourierTransform.FFT(wavFilePathName, melFreqBandCnt, frame_size, frame_stride, duration=0, emphasize=False)
+
+
+freqBandCnt=240   # number of frequency bands to produce from fast Fourier transform 
+(frame_size, frame_stride) = (0.030, 0.010)  # audio frame size and frame stride in seconds
+
+# load a sample audio file
+pathName = "C:\\Data\\TIMIT\\Data\\TRAIN\\DR1\\MTRR0\\"
+audioFile = "SI918.WAV"
+#
+# load a sample audio file
+pathName = "C:\\Data\\TIMIT\\Data\\TEST\\DR6\\MRJR0\\"
+audioFile = "SI2313.WAV"
+#
+
+wavfileName = audioFile + ".wav" 
+wavFilePathName = pathName + wavfileName
+
+channel, spectrogram, phasegram, frqcy, sample_rate, sample_cnt, fft = FourierTransform.FFT(wavFilePathName, 0, frame_size, frame_stride, duration=0, emphasize=False)
 
 
 channel=0
-duration=15
-generatedWavFilePathName = filePath + "test.wav"
+duration=3.5
+generatedWavFilePathName = "C:\\Data\\WAV\\cleaned3.wav"
 
 FourierTransform.playSound(frame_size, frame_stride, spectrogram, phasegram, frqcy, sample_rate, channel, duration, generatedWavFilePathName)
-FourierTransform.playSound(frame_size, frame_stride, spectrogram, None, frqcy, sample_rate, channel, duration, generatedWavFilePathName)
+
+
+
+spect_mixed_np = np.array(spect_mixed)
+spect_cleaned2_np = np.array(spect_cleaned2.detach())
+spect_cleaned3_np = np.array(spect_cleaned3.detach())
+spect_cleaned5_np = np.array(spect_cleaned5.detach())
+
+FourierTransform.playSound(frame_size, frame_stride, spect_mixed_np, phasegram, frqcy, sample_rate, channel, duration, generatedWavFilePathName)
+FourierTransform.playSound(frame_size, frame_stride, spect_cleaned2_np, phasegram, frqcy, sample_rate, channel, duration, generatedWavFilePathName)
+FourierTransform.playSound(frame_size, frame_stride, spect_cleaned3_np, phasegram, frqcy, sample_rate, channel, duration, generatedWavFilePathName)
+
+FourierTransform.playSound(frame_size, frame_stride, spectrogram, None,      frqcy, sample_rate, channel, duration, generatedWavFilePathName)
 
 
 wavFilePathName = filePath + "audiocheck.net_sin_500Hz_-3dBFS_48k.wav"
@@ -552,10 +582,10 @@ N = 400
 T = 1.0 / 800.0
 x = np.linspace(0.0, N*T, N)
 
-y1 = np.sin(50.0 * 2.0*np.pi*x)
+y1 = 2*np.sin(10.0 * 2.0*np.pi*x)
 plt.plot(x, 2.0/N * np.abs(y1))
 
-y2 = np.sin(100.0 * 2.0*np.pi*x)
+y2 = np.sin(20.0 * 2.0*np.pi*x)
 plt.plot(x, 2.0/N * np.abs(y2))
 
 y = y1 +y2
@@ -657,7 +687,7 @@ def combineAudio(filePaths, duration, fileName, amplifyIdx=1, startIdx=0):
     
     #folderPath = 'C:\\Data\\WAV\\Environment\\'
     #fileNames = ['audiobook.wav', 'water-rain1.wav', 'wind01.wav', 'crowdhomerunapplause.wav', 'Corvette_pass.wav', 'lawnmower.wav', 'applause7.wav', 'police_sirens.wav', 'white_noise.wav', 'steps.wav', 'techno_drum.wav']
-    #filePaths = [folderPath + fileNames[0],folderPath + fileNames[10]] 
+    #filePaths = [folderPath + fileNames[0], folderPath + fileNames[10]] 
     
     sample_rate, signal =[[None for _ in (0,len(filePaths))] for _ in (0,2)]
     
@@ -709,28 +739,19 @@ def combineAudio(filePathName1, filePathName2, duration, amplifyIdx=1, startIdx=
 
 
 
-TIMITRootPath = "C:\\Data\\TIMIT\\"
-noiseFilePathName = 'C:\\Data\\WAV\\Environment\\' + 'Whitenoise2_16K' +'.wav'       
-dialects=['DR1']
-
-generateNoisyAudio(TIMITRootPath, dialects, noiseFilePathName)
-
-
-
-def generateNoisyAudio(TIMITRootPath, dialects, noiseFilePathName):
+def generateNoisyAudio(dataframe, TIMITRootPath, dialects, noiseFilePathName):
     #
     TIMITRootPath = TIMITRootPath
     TIMITDataPath = TIMITRootPath + "Data\\"
     dialects  = dialects
     #
-    trainingDataframe = "train_data.df"
-    trainingDataframePathName = TIMITRootPath + trainingDataframe
-    trainSet = pd.read_pickle(trainingDataframePathName)
+    dataframePathName = TIMITRootPath + dataframe
+    dataSet = pd.read_pickle(dataframePathName)
     #
-    trainSub = (trainSet.dialect_region.isin(dialects))
-    trainSet = trainSet[trainSub]
-    trainSet = trainSet.reset_index(drop=True)
-    fileCnt = len(trainSet)
+    trainSub = (dataSet.dialect_region.isin(dialects))
+    dataSet = dataSet[trainSub]
+    dataSet = dataSet.reset_index(drop=True)
+    fileCnt = len(dataSet)
     #
     sample_rate1, signal1 = scipy.io.wavfile.read(noiseFilePathName)
     len1 = len(signal1)
@@ -740,7 +761,7 @@ def generateNoisyAudio(TIMITRootPath, dialects, noiseFilePathName):
     #
     for i in range(0, fileCnt):
         #
-        fileName = trainSet.loc[i].wav.replace('\\\\', '\\')
+        fileName = dataSet.loc[i].wav.replace('\\\\', '\\')
         filePathName = TIMITDataPath + fileName
         #
         sample_rate0, signal0 = scipy.io.wavfile.read(filePathName)
@@ -773,9 +794,21 @@ def generateNoisyAudio(TIMITRootPath, dialects, noiseFilePathName):
     #
         
         
-        
+ 
+
+TIMITRootPath = "C:\\Data\\TIMIT\\"
+noiseFilePathName = 'C:\\Data\\WAV\\Environment\\' + 'Whitenoise2_16K' +'.wav'       
+dialects=['DR1', 'DR2', 'DR3', 'DR4', 'DR5', 'DR6', 'DR7', 'DR8']
+       
+generateNoisyAudio("train_data.df", TIMITRootPath, dialects, noiseFilePathName)
+generateNoisyAudio("test_data.df",  TIMITRootPath, dialects, noiseFilePathName)
     
-    
+
+---------------------------------------------------------------------------------------------------------------------
+
+---------------------------------------------------------------------------------------------------------------------
+
+
 
 generatedWavFilePathName = 'C:\\Data\\WAV\\Environment\\' + 'Whitenoise2_16K' +'.wav'
 sourceFile = 'C:\\Data\\WAV\\Environment\\' + 'Whitenoise2' +'.wav'

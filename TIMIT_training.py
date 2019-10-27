@@ -1,10 +1,7 @@
-<<<<<<< HEAD
-=======
 import pycuda.driver as cuda
 
 import numpy as np
 import pandas as pd
->>>>>>> 450ae4dbb9909140fa04aeebd7b2b68d0591a297
 
 import torch
 import torch.nn as nn
@@ -13,55 +10,28 @@ import torch.nn.functional as F
 from torch.utils.data import Dataset, DataLoader
 
 from TIMIT import FeatureExtraction, Classifier
-<<<<<<< HEAD
 from TIMIT import TIMITDataSet
-from TIMIT import phonedict
-
-from FT_Transpose import AudioGenerator
-from TIMIT_Dataset import TIMITNoisyDataSet
-
-def weights_init(m):
-    classname = m.__class__.__name__
-    print("module: ", classname)
-    #
-    if classname.find('Conv') != -1:
-        (row, col) = m.kernel_size
-        inC = m.in_channels
-        stdev = math.sqrt(1/(inC*row*col))*0.9
-        m.weight.data.normal_(0.0, stdev)
-        print("for Conv modules, use customized initial weights, normal distribution: (0.0, ", stdev, ")")
-    elif classname.find('Linear') != -1:
-        print("for Linear modules, use the default initialization values")
-=======
-
-from TIMIT import TIMITDataSet
-
 from TIMIT import phone_code
+from TIMIT import weights_init
 
 
 torch.cuda.memory_allocated()  # the amount of GPU memory allocated   
 torch.cuda.memory_cached()     # the amount of GPU memory cached   
 
 torch.cuda.empty_cache()  #release all the GPU memory cache that can be freed.
->>>>>>> 450ae4dbb9909140fa04aeebd7b2b68d0591a297
 
 
 #----------------------------------------------------------------------------------
 
 
-def trainClassifier(classifier, training_data_set, batch_size=200, epochCnt=500):
-    #
-    training_loader = DataLoader(training_data_set, batch_size=batch_size, shuffle=True, num_workers=0)
-    #
-    learning_rate = 1e-3
-    momentum = 0.0
+def trainClassifier(classifier, training_loader, learning_rate, momentum, epochCnt=10):
     #
     # choise one of the following optimizers
-    optimizer = torch.optim.SGD(classifier.parameters(), lr=learning_rate, momentum=momentum)   # create a stochastic gradient descent optimizer
+    #optimizer = torch.optim.SGD(classifier.parameters(), lr=learning_rate, momentum=momentum)   # create a stochastic gradient descent optimizer
     optimizer = torch.optim.Adam(classifier.parameters(), lr=learning_rate)
-    optimizer = torch.optim.Adadelta(classifier.parameters())
+    #optimizer = torch.optim.Adadelta(classifier.parameters())
     #
-    for opt in optimizer.param_groups: opt['lr']=0.5e-4
+    #for opt in optimizer.param_groups: opt['lr']=0.5e-4
     #
     lossFunc = nn.NLLLoss()
     #
@@ -91,31 +61,140 @@ def trainClassifier(classifier, training_data_set, batch_size=200, epochCnt=500)
     #
 
 
+def testClassifier(classifier, testing_loader):
+    #
+    bIdx = 0
+    totalCorrect = 0
+    totalRuns = 0
+    #
+    for input_batch, target_batch in testing_loader:   # to iterate: input_batch, target_batch = next(iter(testing_loader))
+        #
+        bIdx += 1
+        input_batch  = input_batch.to('cuda')    # the shape of input_batch = (batch_size, 1, FREQ_BAND, SOUND_WINDOW)
+        target_batch = target_batch.to('cuda')   # the shape of target_batch = (batch_size)
+        #        
+        output_batch = classifier(input_batch)
+        sm = F.softmax(output_batch, dim=1)
+        #
+        numcorrect = 0
+        numruns = np.shape(target_batch)[0]
+        #
+        for _ in range (0, numruns):
+            v, i = torch.max(sm[_], 0)
+            if i == target_batch[_]: 
+                numcorrect += 1
+                totalCorrect += 1
+            #
+            totalRuns += 1
+        #
+        #print('Batch #',  bIdx, "; Number of correctly identified phonemes ", numcorrect)    
+        #
+    percentCorrect = totalCorrect*100/totalRuns
+    print('Percent identified correctly: ' , percentCorrect, '%')
+    return percentCorrect
+    #
+
+
+
 #----------------------------------------------------------------------------------
 # train a classifier
 
 TIMITRootPath = "C:\\Data\\TIMIT\\"
 TIMITDataPath = "C:\\Data\\TIMIT\\Data\\"
-dialects = ['DR1']
+#dialects = ['DR1']
 dialects = ['DR1', 'DR2', 'DR3', 'DR4', 'DR5', 'DR6', 'DR7', 'DR8']
 
-training_data_set = TIMITDataSet(TIMITRootPath, dialects, phonedict)
-training_loader = DataLoader(training_data_set, batch_size=100, shuffle=True, num_workers=0)
+trainingDataFrame = "train_data.df"
+testingDataFrame  = "test_data.df"
+
+training_data_set = TIMITDataSet(TIMITRootPath, dialects, trainingDataFrame, phonedict, dataCnt=140000)
+training_loader = DataLoader(training_data_set, batch_size=200, shuffle=True, num_workers=0)
+
+testing_data_set = TIMITDataSet(TIMITRootPath, dialects, testingDataFrame, phonedict)
+testing_loader = DataLoader(testing_data_set, batch_size=100, shuffle=True, num_workers=0)
 
 classifier = Classifier().cuda()
 classifier.apply(weights_init)
+
+
+runNum = 1
+epochCnt=1
+parameters = []
+progress = []
+
+
+learning_rate = 1e-4
+momentum = 0.0
+parameters.append([runNum, learning_rate, momentum])
+
+#
+for r in range(0, 30):
+    for i in range (0, 10):
+        print ('Training epoch #: ', i)
+        trainClassifier(classifier, training_loader, learning_rate, momentum, epochCnt)
+        #progress.append([runNum, testClassifier(classifier, testing_loader)])
+        runNum += 1
+    #
+    progress.append([runNum, testClassifier(classifier, testing_loader)])
+#
+    
+    
+plt.plot(progress)
+
+accuList=[]
+for [epoch, accu] in progress:
+    accuList.append(accu)
+plt.plot(accuList)
+
+
+np.savetxt('progress_batch50.txt', progress)
+np.savetxt('parameters_batch50.txt', parameters)
+
+progress = np.loadtxt('progress_batch130.txt').tolist()
+parameters = np.loadtxt('parameters_batch130.txt').tolist()
+
+
+
+'''
+frmCnt=training_data_set.frmCnt
+totlFrmCnt=0
+for _ in range(0, len(frmCnt)):
+    totlFrmCnt += frmCnt[_]
+'''
+
+'''
+# load the classifier
+classifierPath = 'C:\\Python\\MachineLearning\\NeuralNetwork\\CNN\\pytorch model\\'
+classifierName = 'Classifier_Inception_TIMIT_ALL.pt'
+classifierModelPathName = classifierPath + classifierName
+# load the trained classifier neural network
+classifier0 = Classifier().cuda()
+classifier0.load_state_dict(torch.load(classifierModelPathName))
+classifier0.eval()
+
+testClassifier(classifier0, testing_loader)
+'''
 
 
 #----------------------------------------------------------------------------------
 # save the trained classifier model
     
 modelPath = 'C:\\Python\\MachineLearning\\NeuralNetwork\\CNN\\pytorch model\\'
-modelName = 'Classifier_Inception_TIMIT_ALL.pt'
+modelName = 'Classifier_TIMIT_ALL_new_batch130.pt'
+modelName = 'Classifier_TIMIT_ALL_new_batch50.pt'
+#modelName = 'Classifier_Inception_TIMIT_ALL.pt'
 modelPathName = modelPath + modelName
 
 torch.save(classifier.state_dict(), modelPathName)
 
 classifier.parameterCnt()
+
+
+# load a trained classifier 
+classifier = Classifier().cuda()
+classifier.load_state_dict(torch.load(modelPathName))
+classifier.eval()
+
 
 
 optimizer=None
@@ -229,7 +308,7 @@ torch.save(generator.state_dict(), modelPathName)
 #----------------------------------------------------------------------------------
 
 
-def trainSoftMask(generator, training_data_set, classifierModelPathName, batch_size=100, epochCnt=5):
+def trainSoftMask(generator, training_data_set, classifierModelPathName, batch_size=100, epochCnt=100):
     #
     training_loader = DataLoader(training_data_set, batch_size=batch_size, shuffle=True, num_workers=0)
     #
@@ -240,7 +319,7 @@ def trainSoftMask(generator, training_data_set, classifierModelPathName, batch_s
     optimizer = torch.optim.Adam(softmask.parameters(), lr=learning_rate)
     #
     # to change the optimizer learning rate
-    for opt in optimizer.param_groups: opt['lr']=1e-5
+    for opt in optimizer.param_groups: opt['lr']=1e-3
     #
     #lossFunc = nn.L1Loss()
     lossFunc = nn.MSELoss()
@@ -253,12 +332,15 @@ def trainSoftMask(generator, training_data_set, classifierModelPathName, batch_s
              #
             totalCnt += len(original)
             #
-            weight = original/noisy
-            flag = weight>2.0
-            weight[flag]=2.0
-            #
             inMatrix = inMatrix.to('cuda')
-            weight = weight.to('cuda')
+            #
+            diff = noisy - original
+            diff = diff.to('cuda')
+            #
+            #weight = original/noisy
+            #flag = weight>2.0
+            #weight[flag]=2.0
+            #weight = weight.to('cuda')
             #
             # pass the data through the classifier first
             outputs = classifier(inMatrix)
@@ -266,7 +348,62 @@ def trainSoftMask(generator, training_data_set, classifierModelPathName, batch_s
             #
             optimizer.zero_grad()
             mask = softmask(featureMap)
-            loss = lossFunc(mask, weight)
+            #loss = lossFunc(mask, weight)
+            loss = lossFunc(mask, diff)
+            loss.backward()
+            # run gradient descent based on the gradients calculated from the backward() function
+            optimizer.step()    
+            #
+            if (batchCnt+1)%5==0 or batchCnt==0:
+                print('Train Epoch: {} [{}/{}]\tLoss: {:.6f}'.format(
+                        epoch, totalCnt, len(training_loader.dataset), loss.data))
+            #
+            batchCnt += 1
+        #
+    #
+    
+def trainRecursiveSoftMask(generator, training_data_set, classifierModelPathName, batch_size=100, epochCnt=400):
+    #
+    training_loader = DataLoader(training_data_set, batch_size=batch_size, shuffle=True, num_workers=0)
+    #
+    learning_rate = 1e-3
+    momentum = 0.0
+    #
+    optimizer = torch.optim.SGD(softmask.parameters(), lr=learning_rate, momentum=momentum)
+    optimizer = torch.optim.Adam(softmask.parameters(), lr=learning_rate)
+    #
+    # to change the optimizer learning rate
+    for opt in optimizer.param_groups: opt['lr']=1e-6
+    #
+    #lossFunc = nn.L1Loss()
+    lossFunc = nn.MSELoss()
+    #
+    for epoch in range(0, epochCnt):
+        batchCnt=0
+        totalCnt=0
+        #
+        for [inMatrix, original, noisy], classId in training_loader:   # to iterate: [inMatrix, original, noisy], classId = next(iter(training_loader))
+             #
+            totalCnt += len(original)
+            #
+            inMatrix = inMatrix.to('cuda')
+            #
+            diff = noisy - original
+            diff = diff.to('cuda')
+            #
+            #weight = original/noisy
+            #flag = weight>2.0
+            #weight[flag]=2.0
+            #weight = weight.to('cuda')
+            #
+            # pass the data through the classifier first
+            outputs = classifier(inMatrix)
+            featureMap = classifier.featureMatrix
+            #
+            optimizer.zero_grad()
+            mask = softmask(featureMap)
+            #loss = lossFunc(mask, weight)
+            loss = lossFunc(mask, diff)
             loss.backward()
             # run gradient descent based on the gradients calculated from the backward() function
             optimizer.step()    
@@ -285,6 +422,7 @@ def trainSoftMask(generator, training_data_set, classifierModelPathName, batch_s
     
 classifierPath = 'C:\\Python\\MachineLearning\\NeuralNetwork\\CNN\\pytorch model\\'
 classifierName = 'Classifier_Inception_TIMIT_DR1.pt'
+classifierName = 'Classifier_Inception_TIMIT_ALL.pt'
 classifierName = 'Classifier_TIMIT_DR1.pt'
 classifierModelPathName = classifierPath + classifierName
 
@@ -297,12 +435,12 @@ classifier.eval()
 
 TIMITRootPath = "C:\\Data\\TIMIT\\"
 TIMITDataPath = "C:\\Data\\TIMIT\\Data\\"
-dialects = ['DR1']
+dialects = ['DR2']
 dialects = ['DR3', 'DR4']
-dialects = ['DR5', 'DR6', 'DR7', 'DR8']
+dialects = ['DR1', 'DR2', 'DR3', 'DR4', 'DR5', 'DR6', 'DR7', 'DR8']
 
 training_data_set = TIMITNoisyDataSet(TIMITRootPath, dialects, phonedict)
-training_loader = DataLoader(training_data_set, batch_size=100, shuffle=True, num_workers=0)
+training_loader = DataLoader(training_data_set, batch_size=200, shuffle=True, num_workers=0)
 
 softmask = AudioGenerator().cuda()
 softmask.apply(weights_init)
@@ -319,7 +457,7 @@ for i in range(0, 100):
 # save the trained softmask
 
 modelPath = 'C:\\Python\\MachineLearning\\NeuralNetwork\\CNN\\pytorch model\\'
-modelName = 'SoftMask_Inception_TIMIT.pt'
+modelName = 'SoftMask_Subtraction_Inception_TIMIT_ALL.pt'
 modelPathName = modelPath + modelName
 
 torch.save(softmask.state_dict(), modelPathName)

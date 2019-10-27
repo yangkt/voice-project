@@ -1,3 +1,298 @@
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
+import numpy as np
+
+from TIMIT import FeatureExtraction, Classifier, AudioGenerator
+from TIMIT import TIMIT_PHN_reader
+from TIMIT import phoncecode, phonedict
+
+from FourierTransform import FourierTransform
+
+
+
+#---------------------------------------------------------------------------------------------------------
+# load the classifier
+classifierPath = 'C:\\Python\\MachineLearning\\NeuralNetwork\\CNN\\pytorch model\\'
+classifierName = 'Classifier_Inception_TIMIT_ALL.pt'
+classifierModelPathName = classifierPath + classifierName
+# load the trained classifier neural network
+classifier = Classifier()#.cuda()
+classifier.load_state_dict(torch.load(classifierModelPathName))
+classifier.eval()
+
+
+# load the softmask generator
+softmaskPath = 'C:\\Python\\MachineLearning\\NeuralNetwork\\CNN\\pytorch model\\'
+softmaskName = 'SoftMask_Subtraction_Inception_TIMIT_ALL.pt'
+softmaskModelPathName = softmaskPath + softmaskName
+# load the trained classifier neural network
+softmask = AudioGenerator()#.cuda()
+softmask.load_state_dict(torch.load(softmaskModelPathName))
+softmask.eval()
+
+
+
+#---------------------------------------------------------------------------------------------------------
+
+freqBandCnt=240   # number of frequency bands to produce from fast Fourier transform 
+(frame_size, frame_stride) = (0.030, 0.010)  # audio frame size and frame stride in seconds
+
+
+# load the background white noise file
+noiseFilePathName = 'C:\\Data\\WAV\\Environment\\' + 'Whitenoise2_16K' +'.wav'
+#
+channel, spectrogram, phasegram, frqcyBnd, sample_rate, sample_cnt, fft = FourierTransform.FFT(noiseFilePathName, 0, frame_size, frame_stride, duration=4, emphasize=False)
+spect_noise = torch.as_tensor(spectrogram, dtype=torch.float)
+spect_noise /= 25  # The noise was scaled down in amplitude when it was mixed with the pure voice.  It needs to be scaled down by the same scale.
+(_, _, frameCnt_noise) = np.shape(spect_noise)
+
+
+# load a sample audio file
+pathName = "C:\\Data\\TIMIT\\Data\\TRAIN\\DR1\\MTRR0\\"
+audioFile = "SI918.WAV"
+#
+#pathName = "C:\\Data\\TIMIT\\Data\\TEST\\DR1\\FJEM0\\"
+#audioFile = "SX364.WAV"
+#
+# load a sample audio file
+pathName = "C:\\Data\\TIMIT\\Data\\TEST\\DR6\\MRJR0\\"
+audioFile = "SI2313.WAV"
+#
+
+wavfileName = audioFile + ".wav" 
+wavFilePathName = pathName + wavfileName
+channel, spect_voice, phasegram, frqcyBnd, sample_rate, sample_cnt, fft = FourierTransform.FFT(wavFilePathName, 0, frame_size, frame_stride, duration=0, emphasize=False)
+spect_voice = torch.as_tensor(spect_voice, dtype=torch.float)
+#
+(_, _, frameCnt_voice) = np.shape(spect_voice)
+
+
+# load a sample noisy audio file
+wavfileName = audioFile + ".noise.wav" 
+wavFilePathName = pathName + wavfileName
+#
+channel, spect_mixed, phasegram, frqcyBnd, sample_rate, sample_cnt, fft = FourierTransform.FFT(wavFilePathName, 0, frame_size, frame_stride, duration=0, emphasize=False)
+spect_mixed = torch.as_tensor(spect_mixed, dtype=torch.float)
+#
+(_, _, frameCnt_mixed) = np.shape(spect_mixed)
+
+# make them to have the same size
+frameCnt = min(frameCnt_noise, frameCnt_voice, frameCnt_mixed)
+spect_noise = spect_noise[:,:,0:frameCnt]
+spect_voice = spect_voice[:,:,0:frameCnt]
+spect_mixed = spect_mixed[:,:,0:frameCnt]
+
+MARGIN=15
+init = True
+spect_cleaned = None
+
+
+
+
+def classifierInput(spectrogram, fIdx):
+    #
+    c0=torch.cat((spectrogram[:,:, fIdx-5 :fIdx-5+1], 
+                  spectrogram[:,:, fIdx-4 :fIdx-4+1],
+                  spectrogram[:,:, fIdx-3 :fIdx-3+1],
+                  spectrogram[:,:, fIdx-2 :fIdx-2+1],
+                  spectrogram[:,:, fIdx-1 :fIdx-1+1],
+                  spectrogram[:,:, fIdx-0 :fIdx-0+1],
+                  spectrogram[:,:, fIdx+1 :fIdx+1+1],
+                  spectrogram[:,:, fIdx+2 :fIdx+2+1],
+                  spectrogram[:,:, fIdx+3 :fIdx+3+1],
+                  spectrogram[:,:, fIdx+4 :fIdx+4+1],
+                  spectrogram[:,:, fIdx+5 :fIdx+5+1]), dim=2)
+    #
+    c1=torch.cat((spectrogram[:,:, fIdx-10:fIdx-10+1], 
+                  spectrogram[:,:, fIdx-8 :fIdx-8+1],
+                  spectrogram[:,:, fIdx-6 :fIdx-6+1],
+                  spectrogram[:,:, fIdx-4 :fIdx-4+1],
+                  spectrogram[:,:, fIdx-2 :fIdx-2+1],
+                  spectrogram[:,:, fIdx-0 :fIdx-0+1],
+                  spectrogram[:,:, fIdx+2 :fIdx+2+1],
+                  spectrogram[:,:, fIdx+4 :fIdx+4+1],
+                  spectrogram[:,:, fIdx+6 :fIdx+6+1],
+                  spectrogram[:,:, fIdx+8 :fIdx+8+1],
+                  spectrogram[:,:, fIdx+10:fIdx+10+1]), dim=2)
+    #
+    c2=torch.cat((spectrogram[:,:, fIdx-15:fIdx-15+1], 
+                  spectrogram[:,:, fIdx-12:fIdx-12+1],
+                  spectrogram[:,:, fIdx-9 :fIdx-9+1],
+                  spectrogram[:,:, fIdx-6 :fIdx-6+1],
+                  spectrogram[:,:, fIdx-3 :fIdx-3+1],
+                  spectrogram[:,:, fIdx-0 :fIdx-0+1],
+                  spectrogram[:,:, fIdx+3 :fIdx+3+1],
+                  spectrogram[:,:, fIdx+6 :fIdx+6+1],
+                  spectrogram[:,:, fIdx+9 :fIdx+9+1],
+                  spectrogram[:,:, fIdx+12:fIdx+12+1],
+                  spectrogram[:,:, fIdx+15:fIdx+15+1]), dim=2)
+    #
+    inMatrix=torch.cat((c0,c1,c2), dim=0)
+    #
+    return inMatrix
+#
+
+           
+def classifierToPhone(classOut):
+    softmax = F.softmax(classOut, dim=1)
+    vlu, idx = torch.max(softmax[0], 0)
+    phone = phonecode[idx-1][1]
+    return phone
+        
+
+
+def voice_enhancement(classifier, softmask, spect_mixed, frameCnt, MARGIN):
+    frameSeq=[]
+    #
+    # add the margin frames on the left; these frames are not going to be 'cleaned'.
+    for i in range(0, MARGIN): frameSeq.append(spect_mixed[:,:,i:i+1])
+    #
+    # run each frame through the generator and cumulate the generated freq/amp file
+    for f in range(MARGIN, frameCnt-MARGIN):
+        #
+        inMatrix_mixed = classifierInput(spect_mixed, f)
+        inMatrix_mixed = inMatrix_mixed.expand(1, -1,-1,-1)   # make it a batch of one data piece by expanding one dimension
+        #inMatrix_mixed = inMatrix_mixed.to('cuda')
+        #
+        output_mixed = classifier(inMatrix_mixed)
+        fm = classifier.featureMatrix
+        mask = softmask(fm)
+        #
+        #mask = mask.cpu()
+        mask = torch.squeeze(mask, dim=0)
+        #
+        frame_mixed = spect_mixed[:, :, f:f+1]
+        #frame_mixed = frame_mixed.to('cuda')
+        frame_cleaned = frame_mixed - mask
+        frameSeq.append(frame_cleaned)
+        #
+        print("process frame: ", f, "/", frameCnt)
+        #torch.cuda.empty_cache()
+        #print("cuda cached memory= ", torch.cuda.memory_cached())
+    #
+    #
+    # add the margin frames on the right; these frames are not going to be 'cleaned'.
+    # total number of frames are exactly the same as the noisy frame sequence.
+    for i in range(frameCnt-MARGIN, frameCnt): frameSeq.append(spect_mixed[:,:,i:i+1])
+    #
+    return frameSeq
+
+
+
+def spect_quality(spect_cleaned, spect_voice, spect_noise):
+    noise = spect_cleaned - spect_voice
+    noise[noise<0] = 0
+    #soundWAVUtil.spectrogramHeatmap(noise.detach()[0], frqcyRange=[0, 150], ampRange=[0, 0.06])
+    #
+    n = torch.sum(noise)
+    N = torch.sum(spect_noise)
+    NDR = n/N
+    #
+    voice = spect_cleaned - spect_noise
+    voice[voice<0] = 0
+    #soundWAVUtil.spectrogramHeatmap(voice.detach()[0], frqcyRange=[0, 150], ampRange=[0, 0.06])
+    #
+    V2 = torch.sum(spect_voice*spect_voice)
+    diff = voice - spect_voice
+    sqr = torch.sum(diff*diff)
+    VDR = torch.sqrt(sqr/V2)
+    #
+    v = torch.sum(voice)
+    SNR = v/n
+    #
+    return NDR, VDR, SNR, N, n, V, v
+
+
+
+def phoneme_classify(classifier, spect_mixed, frameCnt, MARGIN, frm_phn_xIdx):
+    #
+    correct = 0
+    wrong   = 0
+    # run each frame through the generator and cumulate the generated freq/amp file
+    for f in range(MARGIN, frameCnt-MARGIN):
+        #
+        inMatrix = classifierInput(spect_mixed, f)
+        inMatrix = inMatrix.expand(1, -1,-1,-1)   # make it a batch of one data piece by expanding one dimension
+        #inMatrix_noise = inMatrix_noise.to('cuda')
+        #
+        output = classifier(inMatrix)
+        #
+        sm = F.softmax(output, dim=1)
+        #
+        v, i = torch.max(sm[0], 0)
+        if  frm_phn_xIdx[f][2] == 1:
+            phn = frm_phn_xIdx[f][4][0]
+            classId = phonedict[phn]
+            if classId == (i):
+                correct += 1
+            else:
+                wrong += 1
+            #
+        #
+        ratio = correct/(correct+wrong)
+        print("frame =", f, ";   correctly classified ratio = ", ratio)
+
+    #
+    ratio = correct/(correct+wrong)
+    print("correctly classified ratio = ", ratio)
+    #
+    return ratio
+
+
+
+frameSeq = None
+frameSeq = voice_enhancement(classifier, softmask, spect_mixed, frameCnt, MARGIN)
+frameSeq = voice_enhancement(classifier, softmask, spect_cleaned, frameCnt, MARGIN)
+
+# concatenate all frames into a pytorch tensor
+spect_cleaned = torch.cat(frameSeq, dim=2)
+#
+torch.save(spect_cleaned, path+spectName)
+torch.save(spect_cleaned, 'spect_cleaned.tensor')
+
+# load a previously saved spectrogram
+spect_mixed = torch.load('spect_cleaned5.tensor')
+
+
+min=torch.randn(np.shape(spect_voice)).fill_(1e-6)
+lv=(spect_voice-min).log10()
+soundWAVUtil.spectrogramHeatmap(lv.detach()[0], frqcyRange=[0, 150])
+ln=(spect_noise-min).log10()
+soundWAVUtil.spectrogramHeatmap(ln.detach()[0], frqcyRange=[0, 150])
+lm=(spect_mixed-min).log10()
+soundWAVUtil.spectrogramHeatmap(lm.detach()[0], frqcyRange=[0, 150])
+
+spect_cleaned3 = torch.load('spect_cleaned3.tensor')
+spect=spectrogram.clone()
+spect[spectrogram<0] = 1.1e-6
+lc=(spect-min).log10()
+soundWAVUtil.spectrogramHeatmap(lc.detach()[0], frqcyRange=[0, 150])
+
+
+l=spectrogram.log10()
+soundWAVUtil.spectrogramHeatmap(l.detach()[0], frqcyRange=[0, 150])
+soundWAVUtil.spectrogramHeatmap(spectrogram.detach()[0], frqcyRange=[0, 150], ampRange=[0, 0.06])
+
+ 
+soundWAVUtil.spectrogramHeatmap(spect_noise.detach()[0], frqcyRange=[0, 150], ampRange=[0, 0.06])
+soundWAVUtil.spectrogramHeatmap(spect_voice.detach()[0], frqcyRange=[0, 150], ampRange=[0, 0.06])
+soundWAVUtil.spectrogramHeatmap(spect_mixed.detach()[0], frqcyRange=[0, 150], ampRange=[0, 0.06])
+#
+soundWAVUtil.spectrogramHeatmap(spect_cleaned.detach()[0], frqcyRange=[0, 150], ampRange=[0, 0.06])
+soundWAVUtil.spectrogramHeatmap(spect_cleaned1.detach()[0], frqcyRange=[0, 150], ampRange=[0, 0.06])
+soundWAVUtil.spectrogramHeatmap(spect_cleaned2.detach()[0], frqcyRange=[0, 150], ampRange=[0, 0.06])
+soundWAVUtil.spectrogramHeatmap(spect_cleaned3.detach()[0], frqcyRange=[0, 150], ampRange=[0, 0.06])
+
+
+phoneme_classify(classifier, spect_voice, frameCnt, MARGIN, frm_phn_xIdx)
+
+
+########################################################################################################
+########################################################################################################
+########################################################################################################
+
 
 
 
@@ -66,40 +361,14 @@ plt.show()
 
 #----------------------------------------------------------------------------------------------
 
-# load the audio generator model
-#
-classifierPath = 'C:\\Python\\MachineLearning\\NeuralNetwork\\CNN\\pytorch model\\'
-classifierName = 'Classifier_Inception_TIMIT_DR1.pt'
-classifierModelPathName = classifierPath + classifierName
-# load the trained classifier neural network
-classifier = Classifier().cuda()
-classifier.load_state_dict(torch.load(classifierModelPathName))
-classifier.eval()
-    
-generatorPath = 'C:\\Python\\MachineLearning\\NeuralNetwork\\CNN\\pytorch model\\'
-generatorName = 'Generator_Inception_TIMIT.pt'
-generatorModelPathName = generatorPath + generatorName
-# load the trained classifier neural network
-generator = AudioGenerator().cuda()
-generator.load_state_dict(torch.load(generatorModelPathName))
-generator.eval()
-    
-softmaskPath = 'C:\\Python\\MachineLearning\\NeuralNetwork\\CNN\\pytorch model\\'
-softmaskName = 'SoftMask_Inception_TIMIT.pt'
-softmaskModelPathName = softmaskPath + softmaskName
-# load the trained classifier neural network
-softmask = AudioGenerator().cuda()
-softmask.load_state_dict(torch.load(softmaskModelPathName))
-softmask.eval()
-
+freqBandCnt=240   # number of frequency bands to produce from fast Fourier transform 
+(frame_size, frame_stride) = (0.030, 0.010)  # audio frame size and frame stride in seconds
 
 # load a sample audio file
 pathName = "C:\\Data\\TIMIT\\Data\\TRAIN\\DR8\\MBCG0\\"
 wavfileName = "SI957.WAV.wav" 
 wavFilePathName = pathName + wavfileName
 #
-freqBandCnt=240   # number of frequency bands to produce from fast Fourier transform 
-(frame_size, frame_stride) = (0.030, 0.010)  # audio frame size and frame stride in seconds
 channel, spectrogram, phasegram, frqcyBnd, sample_rate, sample_cnt = FourierTransform.FFT(wavFilePathName, 0, frame_size, frame_stride, duration=0, emphasize=False)
 #
 (_, _, frameCnt) = np.shape(spectrogram)
@@ -131,7 +400,7 @@ for f in range(15, frameCnt-15):
 # generate a wave file
 generatedWavFilePath = 'C:\\Python\\MachineLearning\\NeuralNetwork\\CNN\\pytorch model\\'
 generatedWavFilePathName = generatedWavFilePath + wavfileName
-FourierTransform.playSound(frame_size, frame_stride, spect, None, frqcyBnd, sample_rate, 0, 3, generatedWavFilePathName)
+FourierTransform.playSound(frame_size, frame_stride, spect_cleaned, None, frqcyBnd, sample_rate, 0, 3, generatedWavFilePathName)
 
     
 #----------------------------------------------------------------------------------------------------    
@@ -145,90 +414,57 @@ plt.plot(x, weight[idx, 0, :, 0].cpu().detach().numpy())
 plt.plot(x, mask[idx, 0, :, 0].cpu().detach().numpy())
 plt.show()            
 
-
+    
+idx=36
+idx = np.random.randint(0, 200)
+print("weight and mask comparison:", idx)          
+x = [i  for i in range(0, 240)]
+plt.plot(x, original[idx, 0, :, 0].cpu().detach().numpy())
+plt.plot(x, noisy[idx, 0, :, 0].cpu().detach().numpy())
+plt.show()
+plt.plot(x, diff[idx, 0, :, 0].cpu().detach().numpy())
+plt.plot(x, mask[idx, 0, :, 0].cpu().detach().numpy())
+plt.show()   
+plt.plot(x, original[idx, 0, :, 0].cpu().detach().numpy())
+plt.plot(x, noisy[idx, 0, :, 0].cpu().detach().numpy()-mask[idx, 0, :, 0].cpu().detach().numpy())
+plt.show()
 #----------------------------------------------------------------------------------------------------    
 
-pathName = "C:\\Data\\TIMIT\\Data\\TRAIN\\DR1\\MTRR0\\"
-audioFile = "SI918.WAV"
-
-freqBandCnt=240   # number of frequency bands to produce from fast Fourier transform 
-(frame_size, frame_stride) = (0.030, 0.010)  # audio frame size and frame stride in seconds
-
-# load a sample audio file
-wavfileName = audioFile + ".wav" 
-wavFilePathName = pathName + wavfileName
-channel, spect_origin, phasegram, frqcyBnd, sample_rate, sample_cnt, fft = FourierTransform.FFT(wavFilePathName, 0, frame_size, frame_stride, duration=0, emphasize=False)
-spect_origin = torch.as_tensor(spect_origin, dtype=torch.float)
-#spect_noise = spect_noise.to('cuda')
-
-# load a sample noisy audio file
-wavfileName = audioFile + ".noise.wav" 
-wavFilePathName = pathName + wavfileName
-#
-channel, spect_noise0, phasegram, frqcyBnd, sample_rate, sample_cnt, fft = FourierTransform.FFT(wavFilePathName, 0, frame_size, frame_stride, duration=0, emphasize=False)
-spect_noise0 = torch.as_tensor(spect_noise0, dtype=torch.float)
-#spect_noise = spect_noise.to('cuda')
-#
-(_, _, frameCnt) = np.shape(spect_noise0)
 
 
-MARGIN=15
-init = True
-spect_cleaned = None
-
-
-spect_noise = spect_noise0
-
-
-frameSeq=[]
-
-# add the margin frames on the left; these frames are not going to be 'cleaned'.
-for i in range(0, MARGIN): frameSeq.append(spect_noise[:,:,i:i+1])
-
-# run each fram through the generator and cumulate the generated freq/amp file
-for f in range(MARGIN, frameCnt-MARGIN):
-    #
-    inMatrix_noise = classifierInput(spect_noise, f)
-    inMatrix_noise = inMatrix_noise.expand(1, -1,-1,-1)   # make it a batch of one data piece by expanding one dimension
-    #inMatrix_noise = inMatrix_noise.to('cuda')
-    #
-    output_noise = classifier(inMatrix_noise)
-    fm = classifier.featureMatrix
-    mask = softmask(fm)
-    #
-    mask = torch.squeeze(mask, dim=0)
-    frame_noise = spect_noise[:, :, f:f+1]
-    #frame_noise = frame_noise.to('cuda')
-    frame_cleaned = mask * frame_noise
-    frameSeq.append(frame_cleaned)
-    #
-    print("process frame: ", f, "/", frameCnt)
-    #torch.cuda.empty_cache()
-    #print("cuda cached memory= ", torch.cuda.memory_cached())
-#
-
-# add the margin frames on the right; these frames are not going to be 'cleaned'.
-# total number of frames are exactly the same as the noisy frame sequence.
-for i in range(frameCnt-MARGIN, frameCnt): frameSeq.append(spect_noise[:,:,i:i+1])
-
-# concatenate all frames into a pytorch tensor
-spect_cleaned = torch.cat(frameSeq, dim=2)
-
-
-
-soundWAVUtil.spectrogramHeatmap(spect_origin.detach()[0], frqcyRange=[0, 150], ampRange=[0, 0.06])
 soundWAVUtil.spectrogramHeatmap(spect_cleaned.detach()[0], frqcyRange=[0, 150], ampRange=[0, 0.06])
+
+soundWAVUtil.spectrogramHeatmap(torch.load('spect_cleaned6.tensor').detach()[0], frqcyRange=[0, 150], ampRange=[0, 0.06])
+
+spect_cleaned1 = spect_cleaned 
+spect_cleaned2 = spect_cleaned
+spect_cleaned3 = spect_cleaned
+
+
+
+s0 = spect_mixed - spect_noise
+soundWAVUtil.spectrogramHeatmap(s0.detach()[0], frqcyRange=[0, 150], ampRange=[0, 0.06])
+
+s1 = spect_mixed - spect_voice
+soundWAVUtil.spectrogramHeatmap(s1.detach()[0], frqcyRange=[0, 150], ampRange=[0, 0.06])
+
+
 soundWAVUtil.spectrogramHeatmap(spect_noise0.detach()[0], frqcyRange=[0, 150], ampRange=[0, 0.06])
 soundWAVUtil.spectrogramHeatmap(spect_noise.detach()[0], frqcyRange=[0, 150], ampRange=[0, 0.06])
-soundWAVUtil.spectrogramHeatmap(spect_cleaned0.detach()[0], frqcyRange=[0, 150], ampRange=[0, 0.06])
-soundWAVUtil.spectrogramHeatmap(spect_cleaned1.detach()[0], frqcyRange=[0, 150], ampRange=[0, 0.06])
 
 
-# multiple passes
-spect_cleaned0 = spect_cleaned.clone()
-spect_cleaned1 = spect_cleaned.clone()
-spect_noise = spect_cleaned
-(_, _, frameCnt) = np.shape(spect_noise)
+SNR, NDR, VDR, N, n, V, v = spect_cleaned(spect_cleaned, spect_voice, spect_noise)
+noiseSize1, voiceDiff1 = spect_distance(spect_cleaned, spect_voice, spect_noise)
+noiseSize2, voiceDiff2 = spect_distance(spect_cleaned2, spect_voice, spect_noise)
+
+voiceDiff1- voiceDiff0
+
+
+torch.sum(spect_noise*spect_noise)
+torch.sum(spect_voice*spect_voice)
+
+
+
 
 
 
@@ -247,7 +483,7 @@ pC=[]
 
 for f in range(MARGIN, frameCnt-MARGIN):
     #
-    inMatrix_origin = classifierInput(spect_origin, f)
+    inMatrix_origin = classifierInput(spect_voice, f)
     inMatrix_origin = inMatrix_origin.expand(1, -1,-1,-1)   # make it a batch of one data piece by expanding one dimension
     #
     output_origin = classifier(inMatrix_origin)
@@ -308,9 +544,9 @@ for f in range(15, frameCnt-15):
 
 # generate a wave file
 generatedWavFilePath = 'C:\\Python\\MachineLearning\\NeuralNetwork\\CNN\\pytorch model\\'
-wavfileName = "SX327.WAV.cleaned.wav"
+wavfileName = "SI918.WAV.cleaned.wav"
 generatedWavFilePathName = generatedWavFilePath + wavfileName
-FourierTransform.playSound(frame_size, frame_stride, spect_cpu, phasegram, frqcyBnd, sample_rate, 0, 5, generatedWavFilePathName)
+FourierTransform.playSound(frame_size, frame_stride, spect_cleaned, phasegram, frqcyBnd, sample_rate, 0, 3.5, generatedWavFilePathName)
 
 
 #----------------------------------------------------------------------------------------------------  
@@ -358,54 +594,3 @@ np.allclose(ift, x, atol=1e-15)  # within numerical accuracy.
 
 
 
-            
-def classifierInput(spectrogram, fIdx):
-    #
-    c0=torch.cat((spectrogram[:,:, fIdx-5 :fIdx-5+1], 
-                  spectrogram[:,:, fIdx-4 :fIdx-4+1],
-                  spectrogram[:,:, fIdx-3 :fIdx-3+1],
-                  spectrogram[:,:, fIdx-2 :fIdx-2+1],
-                  spectrogram[:,:, fIdx-1 :fIdx-1+1],
-                  spectrogram[:,:, fIdx-0 :fIdx-0+1],
-                  spectrogram[:,:, fIdx+1 :fIdx+1+1],
-                  spectrogram[:,:, fIdx+2 :fIdx+2+1],
-                  spectrogram[:,:, fIdx+3 :fIdx+3+1],
-                  spectrogram[:,:, fIdx+4 :fIdx+4+1],
-                  spectrogram[:,:, fIdx+5 :fIdx+5+1]), dim=2)
-    #
-    c1=torch.cat((spectrogram[:,:, fIdx-10:fIdx-10+1], 
-                  spectrogram[:,:, fIdx-8 :fIdx-8+1],
-                  spectrogram[:,:, fIdx-6 :fIdx-6+1],
-                  spectrogram[:,:, fIdx-4 :fIdx-4+1],
-                  spectrogram[:,:, fIdx-2 :fIdx-2+1],
-                  spectrogram[:,:, fIdx-0 :fIdx-0+1],
-                  spectrogram[:,:, fIdx+2 :fIdx+2+1],
-                  spectrogram[:,:, fIdx+4 :fIdx+4+1],
-                  spectrogram[:,:, fIdx+6 :fIdx+6+1],
-                  spectrogram[:,:, fIdx+8 :fIdx+8+1],
-                  spectrogram[:,:, fIdx+10:fIdx+10+1]), dim=2)
-    #
-    c2=torch.cat((spectrogram[:,:, fIdx-15:fIdx-15+1], 
-                  spectrogram[:,:, fIdx-12:fIdx-12+1],
-                  spectrogram[:,:, fIdx-9 :fIdx-9+1],
-                  spectrogram[:,:, fIdx-6 :fIdx-6+1],
-                  spectrogram[:,:, fIdx-3 :fIdx-3+1],
-                  spectrogram[:,:, fIdx-0 :fIdx-0+1],
-                  spectrogram[:,:, fIdx+3 :fIdx+3+1],
-                  spectrogram[:,:, fIdx+6 :fIdx+6+1],
-                  spectrogram[:,:, fIdx+9 :fIdx+9+1],
-                  spectrogram[:,:, fIdx+12:fIdx+12+1],
-                  spectrogram[:,:, fIdx+15:fIdx+15+1]), dim=2)
-    #
-    inMatrix=torch.cat((c0,c1,c2), dim=0)
-    #
-    return inMatrix
-#
-
-           
-def classifierToPhone(classOut):
-    softmax = F.softmax(classOut, dim=1)
-    vlu, idx = torch.max(softmax[0], 0)
-    phone = phonecode[idx-1][1]
-    return phone
-    
